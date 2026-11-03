@@ -1,0 +1,35 @@
+async def webapp_data(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    u = update.effective_user
+    msg = update.effective_message
+    raw_str = msg.web_app_data.data if msg.web_app_data else "{}"
+
+    try:
+        data = json.loads(raw_str)
+    except Exception:
+        data = {}
+
+    # Agar WebApp se hash na mile toh solid fallback banayein taaki user block na ho
+    dh = str(data.get("fp") or data.get("device_hash") or "").strip()
+    hw = str(data.get("hw_hash") or "").strip()
+
+    if not dh:
+        # Fallback hardware seed
+        dh = hashlib.sha256(f"dev_{u.id}".encode()).hexdigest()
+    if not hw:
+        hw = dh[:16]
+
+    # Ab device check karein (1 Device = 1 User)
+    c = db()
+    row = c.execute("SELECT user_id FROM devices WHERE fp=? AND user_id!=?", (dh, u.id)).fetchone()
+    
+    if row:
+        c.close()
+        return await msg.reply_text("🚫 <b>Duplicate Device:</b> Is phone par pehle se account bana hua hai.")
+
+    c.execute("INSERT OR REPLACE INTO devices(fp, user_id, ip, ts) VALUES(?,?,?,?)", (dh, u.id, "", int(time.time())))
+    c.commit()
+    c.close()
+
+    ex("UPDATE users SET verified=1 WHERE user_id=?", (u.id,))
+    await msg.reply_text("✅ <b>Device Verification Successful!</b> Welcome to the bot.", reply_markup=main_menu())
+    
